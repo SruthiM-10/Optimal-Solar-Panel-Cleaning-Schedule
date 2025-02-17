@@ -1,9 +1,6 @@
 import pandas as pd
-import sys
-from sklearn.preprocessing import StandardScaler
 
-def accessData(path):
-    data = pd.read_csv(path)
+def accessData(data):
     data = data[["Unnamed: 0", "ac_power", "poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
     for col in ["ac_power", "poa_irradiance", "ambient_temp", "wind_speed", "soiling"]:
         data[col] = pd.to_numeric(data[col], errors='coerce')
@@ -27,8 +24,5 @@ def accessData(path):
                 return x
 
         data[col] = data[col].apply(apply)
-        scale = StandardScaler()
-        data = scale.fit_transform(data.iloc[:, 2:])
-        data = pd.DataFrame(data.iloc[:, 2:], columns=data.columns[2:])
 
     return data
