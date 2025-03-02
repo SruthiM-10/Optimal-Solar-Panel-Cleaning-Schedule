@@ -5,8 +5,10 @@ def accessData(data):
     for col in ["ac_power", "poa_irradiance", "ambient_temp", "wind_speed", "soiling"]:
         data[col] = pd.to_numeric(data[col], errors='coerce')
     data.dropna(inplace=True)
+    delete_outliers(data)
+    return data
 
-    # Code to delete outliers
+def delete_outliers(data):
     for col in ["ac_power", "poa_irradiance", "ambient_temp", "wind_speed", "soiling"]:
         q1 = data[col].quantile(0.25)
         q3 = data[col].quantile(0.75)
@@ -24,5 +26,4 @@ def accessData(data):
                 return x
 
         data[col] = data[col].apply(apply)
-
     return data

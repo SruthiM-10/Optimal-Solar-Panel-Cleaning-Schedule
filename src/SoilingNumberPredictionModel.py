@@ -66,8 +66,9 @@ def NeuralNetwork(data):
 
 def DegredationRate(data):
     diff = data.diff()
-    diff = diff[diff < 0]
-    return diff.mean()
+    diff.dropna(inplace = True)
+    diff = diff[diff["soiling"] < 0]
+    return diff["soiling"].mean()
 
 def hyperparameterTuning(data):
     train_df, test_df = train_test_split(data, test_size=0.3, random_state=1)

@@ -1,56 +1,106 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, Input
+from keras.src.callbacks import early_stopping
+from tensorflow.keras.layers import Dense, Input, Dropout, BatchNormalization
 from tensorflow.keras import Sequential
+from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.losses import MeanSquaredError, BinaryCrossentropy
 from tensorflow.keras.activations import sigmoid
-from sklearn.model_selection import train_test_split
 import random
 import numpy as np
-from sklearn.metrics import mean_absolute_percentage_error
+from sklearn.metrics import mean_absolute_percentage_error, r2_score
 from tensorflow.keras import layers
 import keras_tuner as kt
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
+from tensorflow.python.keras.losses import mean_squared_logarithmic_error
+# from xgboost import XGBRegressor
+from sklearn.preprocessing import StandardScaler
+import joblib
 
+def smape(y_true, y_pred):
+    epsilon = tf.keras.backend.epsilon()
+    numerator = tf.abs(y_true - y_pred)
+    denominator = (tf.abs(y_true) + tf.abs(y_pred)) / 2 + epsilon  # Prevent division by zero
+    return tf.reduce_mean(numerator / denominator) * 100
 
-def NeuralNetwork(data):
-      train_df, test_df = train_test_split(data, test_size=0.3, random_state=1)
+def log_cosh_mape(y_true, y_pred):
+    epsilon = tf.keras.backend.epsilon()
+    y_true = tf.where(tf.abs(y_true) < epsilon, epsilon, y_true)
+    diff = (y_true - y_pred) / tf.abs(y_true)
+    diff = tf.clip_by_value(diff, -10.0, 10.0)
+    return tf.reduce_mean(tf.math.log(tf.cosh(diff))) * 100  # Scale result
+
+def msle(y_true, y_pred):
+    epsilon = tf.keras.backend.epsilon()
+    y_true = tf.where(y_true < 0, 0.0, y_true)
+    y_pred = tf.where(y_pred < 0, 0.0, y_pred)
+    return tf.reduce_mean(tf.square(tf.math.log1p(y_true + epsilon) - tf.math.log1p(y_pred + epsilon)))
+
+def FeedForwardNetwork(train_df, test_df):
       train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
       train_y = train_df["ac_power"]
 
       test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
       test_y = test_df["ac_power"]
       mean_y = train_y.mean()
-      print(mean_y)
 
-      SEED = 42
+      expected_loss = np.var(train_y)
+
+      SEED = 23
       random.seed(SEED)
       np.random.seed(SEED)
       tf.random.set_seed(SEED)
       model = Sequential([
-        tf.keras.Input(shape=(4,)),
-        Dense(224, activation='tanh'),
-        Dense(256, activation='relu'),
-        Dense(1, activation=None,
-              kernel_initializer=tf.keras.initializers.HeUniform(),
-              bias_initializer=tf.keras.initializers.Constant(mean_y))
+          tf.keras.Input(shape=(4,)),
+          Dense(256, activation="relu"),
+          Dense(200, activation="tanh"),
+          BatchNormalization(),
+          Dense(356, activation="relu"),
+          Dense(300, activation="relu"),
+          Dense(300, activation="relu"),
+          Dense(200, activation="tanh"),
+          Dense(200, activation="relu"),
+          Dense(200, activation="relu"),
+          Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
+                bias_initializer=tf.keras.initializers.Constant(mean_y)),
       ])
-      model.compile(loss="mse", optimizer=tf.keras.optimizers.Adam(3e-4), metrics=["mse", tf.keras.metrics.MeanAbsolutePercentageError()])
-      model.fit(train_x, train_y, epochs=15, validation_data= (test_x, test_y))
-      y_pred = model.predict(test_x)
-      print(mean_absolute_percentage_error(test_y, y_pred))
-      plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
-      plt.scatter(np.arange(0, test_y.size), test_y, label = "actual")
-      plt.legend()
-      plt.show()
+      # model = Sequential([
+      #     tf.keras.Input(shape=(4,)),
+      #     Dense(256, activation="relu"),
+      #     tf.keras.layers.BatchNormalization(),
+      #     Dense(200, activation="tanh"),
+      #     Dense(256, activation="relu"),
+      #     tf.keras.layers.BatchNormalization(),
+      #     Dense(100, activation="tanh"),
+      #     Dense(300, activation= "relu"),
+      #     Dense(200, activation= "relu"),
+      #     Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
+      #           bias_initializer=tf.keras.initializers.Constant(mean_y)),
+      # ])
+      model.compile(loss='mae', optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm= 1.0),
+                    metrics=[tf.keras.metrics.MeanAbsolutePercentageError()])
 
+      model.fit(train_x, train_y, epochs=5000, batch_size= 256) # used to be 3000, 200
+      y_pred = model.predict(test_x)
+      print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
+      print(f'R^2: {r2_score(test_y, y_pred)}')
+
+      # plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
+      # plt.scatter(np.arange(0, test_y.size), test_y, label = "actual")
+      # plt.legend()
+      # plt.show()
+
+      model.save('model 2/onpm_latest5_msle.keras')
       return model
 
-def hyperparameterTuning(original_data):
-    scaler = MinMaxScaler()
-    data = original_data.copy()
-    data["ac_power"] = scaler.fit_transform(data[["ac_power"]])
-    train_df, test_df = train_test_split(data, test_size=0.3, random_state=1)
+def XGBoost(train_df, test_df):
+    train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+    train_y = train_df["ac_power"]
+
+    test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+    test_y = test_df["ac_power"]
+
+def hyperparameterTuning(train_df, test_df):
     train_x = train_df[["soiling", "poa_irradiance", "ambient_temp", "wind_speed"]]
     train_y = train_df["ac_power"]
 
@@ -67,7 +117,7 @@ def hyperparameterTuning(original_data):
 
         for i in range(hp.Int('num_layers', 1, 3)):
             model.add(layers.Dense(units=hp.Int(f'units_{i}', min_value=32, max_value=256, step=32),
-                                   activation=hp.Choice('activation', ['relu', 'sigmoid', 'tanh'])),
+                                   activation=hp.Choice(f'activation_{i}', ['relu', 'sigmoid', 'tanh'])),
             model.add(layers.Dropout(hp.Float('dropout', 0.0, 0.5, step=0.1))))
 
         model.add(layers.Dense(1, activation= None,
@@ -82,10 +132,10 @@ def hyperparameterTuning(original_data):
     # Use Keras Tuner
     tuner = kt.Hyperband(build_model,
                           objective='val_loss',
-                          max_epochs=40,
+                          max_epochs=20,
                           factor=3,
                           directory='hyperparam_tuning_HB_onpm',
-                          project_name='regression_nn2')
+                          project_name='regression_nn5')
 
     # Run the hyperparameter search
     tuner.search(train_x, train_y, epochs=40, verbose=1, validation_data=(test_x, test_y))
@@ -109,4 +159,5 @@ def hyperparameterTuning(original_data):
     Units in layer 0: 224
     Units in layer 1: 256
     '''
+
 
