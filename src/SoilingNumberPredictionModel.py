@@ -12,7 +12,8 @@ from tensorflow.keras.losses import MeanSquaredError, BinaryCrossentropy
 from tensorflow import keras
 from tensorflow.keras import layers
 import keras_tuner as kt
-from functools import partial
+import pandas as pd
+import rdtools
 
 def SVC(data):
 
@@ -65,10 +66,15 @@ def NeuralNetwork(data):
     return y_pred, model
 
 def DegredationRate(data):
-    diff = data.diff()
-    diff.dropna(inplace = True)
-    diff = diff[diff["soiling"] < 0]
-    return diff["soiling"].mean()
+    data = data.resample('D').ffill()
+    data = data.asfreq("D")
+    data.index = pd.to_datetime(data.index)
+    degredation_result = rdtools.degradation_classical_decomposition(data["ac_power"])
+    return degredation_result
+    # diff = data.diff()
+    # diff.dropna(inplace = True)
+    # diff = diff[diff["soiling"] < 0]
+    # return diff["soiling"].mean()
 
 def hyperparameterTuning(data):
     train_df, test_df = train_test_split(data, test_size=0.3, random_state=1)

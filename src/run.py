@@ -22,6 +22,7 @@ def main():
 
     data["Unnamed: 0"] = pd.to_datetime(data["Unnamed: 0"])
     days_data = data.groupby(data["Unnamed: 0"].dt.date).mean()
+    days_data.index = pd.to_datetime(days_data.index)
     days_data["ac_power"] = data[["ac_power"]].groupby(data["Unnamed: 0"].dt.date).sum()
     days_data.drop("Unnamed: 0", axis=1, inplace=True)
 
@@ -67,34 +68,43 @@ def main():
     print(f"MAPE: {mean_absolute_percentage_error(days_data['ac_power'], y_pred)}")
     print(f'R^2: {r2_score(days_data["ac_power"], y_pred)}')
 
-    plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
-    plt.scatter(np.arange(0, y_pred.size), days_data["ac_power"], label = "actual")
-    plt.legend()
-    plt.show()
+    # plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
+    # plt.scatter(np.arange(0, y_pred.size), days_data["ac_power"], label = "actual")
+    # plt.legend()
+    # plt.show()
+
+    matrix = np.load("matrix6.npy")
+    # plt.scatter(matrix[2], matrix[1])
+    # plt.show()
 
     previous_ac_power = data["ac_power"].sum()
     new_ac_power = 0
     total_cleanings = 0
     days_data = original_days_data
-    degradation_rate = snpm.DegredationRate(days_data)
+    degradation_rate = snpm.DegredationRate(days_data)[0]/365
 
     cleaning_cost = 412.5 * 0.795 / 7.87432 # m^3 * dollars/m^3 for cleaning / value of electricity in dollars
     cleaning_cost_matrix = np.zeros((4, 100))
     cleaning_cost_matrix[0] = np.arange(0, 100)
     # want to store output power percent increase and cleaning percent increase at each coefficient
     execution_times = []
+    previous_ac_power /= 1000
 
-    for c in range(0, 100):
+    cleaning_cost_matrix = matrix
+    cleaning_cost_matrix = np.append(cleaning_cost_matrix, np.zeros((4, 9501)), axis=1)
+    # cleaning_cost_matrix = np.zeros((4, 501))
+    for c in range(505, 10000, 10):
+        cleaning_cost_matrix[0][c] = c
         cleaning_cost = cleaning_cost_matrix[0][c]
         start_time = time.time()
         total_cleanings = 0
         new_ac_power = 0
-        for today in range(0, days_data["soiling"].size - 7, 7): # don't scale next_week maybe because degradation_rate calculation is messed up?
+        for today in range(0, days_data["soiling"].size - 7, 7):
             next_week = days_data.iloc[today: today + 7]
             if total_cleanings > 0:
                 i = 1
                 for index, day in next_week.iterrows():
-                    day["soiling"] = days_data["soiling"][today - 1] + degradation_rate * i
+                    day["soiling"] = np.maximum(0, days_data["soiling"][today - 1] + degradation_rate * i)
                     wanted_dataframe = day[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].to_frame().T
                     day["ac_power"] = ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
                     i += 1
@@ -115,7 +125,7 @@ def main():
                         wanted_dataframe = predicted_week[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].iloc[i].to_frame().T
                         total_p += ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
                         for day in range(i + 1, 7):
-                            predicted_week["soiling"][day] = 1 + degradation_rate * (day - clean_day)
+                            predicted_week["soiling"][day] = np.maximum(0, 1 + degradation_rate * (day - clean_day))
                     else:
                         wanted_dataframe = predicted_week[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].iloc[i].to_frame().T
                         total_p += ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index=wanted_dataframe.index, columns=wanted_dataframe.columns))
@@ -132,12 +142,14 @@ def main():
             new_ac_power += max_p
             days_data[today : today + 7] = next_week
         cleaning_cost_matrix[1][c] = (new_ac_power - previous_ac_power) / previous_ac_power
-        cleaning_cost_matrix[2][c] = (total_cleanings - prev_number_of_cleanings) / prev_number_of_cleanings
+        cleaning_cost_matrix[2][c] = (prev_number_of_cleanings - total_cleanings) / prev_number_of_cleanings
         cleaning_cost_matrix[3][c] = cleaning_cost_matrix[2][c] / cleaning_cost_matrix[1][c]
         end_time = time.time()
         execution_times.append(end_time - start_time)
-    np.save('matrix2.npy', cleaning_cost_matrix)
-    max = cleaning_cost_matrix[3].max().index
+    np.save('matrix6.npy', cleaning_cost_matrix)
+    np.save('execution_times2.npy', execution_times)
+
+    max = pd.DataFrame(cleaning_cost_matrix[3]).imax()
     new_ac_power = cleaning_cost_matrix[1][max]
     total_cleanings = cleaning_cost_matrix[2][max]
     print(f"Previous output power: {previous_ac_power}\n")
