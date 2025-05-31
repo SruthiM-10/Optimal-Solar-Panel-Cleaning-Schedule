@@ -7,15 +7,9 @@ from tensorflow.keras.losses import MeanSquaredError, BinaryCrossentropy
 from tensorflow.keras.activations import sigmoid
 import random
 import numpy as np
-from sklearn.metrics import mean_absolute_percentage_error, r2_score
+from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 from tensorflow.keras import layers
 import keras_tuner as kt
-from sklearn.preprocessing import MinMaxScaler
-import matplotlib.pyplot as plt
-from tensorflow.python.keras.losses import mean_squared_logarithmic_error
-# from xgboost import XGBRegressor
-from sklearn.preprocessing import StandardScaler
-import joblib
 
 def smape(y_true, y_pred):
     epsilon = tf.keras.backend.epsilon()
@@ -36,15 +30,11 @@ def msle(y_true, y_pred):
     y_pred = tf.where(y_pred < 0, 0.0, y_pred)
     return tf.reduce_mean(tf.square(tf.math.log1p(y_true + epsilon) - tf.math.log1p(y_pred + epsilon)))
 
-def FeedForwardNetwork(train_df, test_df):
-      train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
-      train_y = train_df["ac_power"]
+def FeedForwardNetwork(data):
+      arr = data["ac_power"]
+      mean_y = arr.mean()
 
-      test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
-      test_y = test_df["ac_power"]
-      mean_y = train_y.mean()
-
-      expected_loss = np.var(train_y)
+      expected_loss = np.var(arr)
 
       SEED = 23
       random.seed(SEED)
@@ -64,41 +54,31 @@ def FeedForwardNetwork(train_df, test_df):
           Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
                 bias_initializer=tf.keras.initializers.Constant(mean_y)),
       ])
-      # model = Sequential([
-      #     tf.keras.Input(shape=(4,)),
-      #     Dense(256, activation="relu"),
-      #     tf.keras.layers.BatchNormalization(),
-      #     Dense(200, activation="tanh"),
-      #     Dense(256, activation="relu"),
-      #     tf.keras.layers.BatchNormalization(),
-      #     Dense(100, activation="tanh"),
-      #     Dense(300, activation= "relu"),
-      #     Dense(200, activation= "relu"),
-      #     Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
-      #           bias_initializer=tf.keras.initializers.Constant(mean_y)),
-      # ])
       model.compile(loss='mae', optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm= 1.0),
                     metrics=[tf.keras.metrics.MeanAbsolutePercentageError()])
 
-      model.fit(train_x, train_y, epochs=5000, batch_size= 256) # used to be 3000, 200
-      y_pred = model.predict(test_x)
-      print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
-      print(f'R^2: {r2_score(test_y, y_pred)}')
+      # model.fit(train_x, train_y, epochs=5000, batch_size= 256)
+      # y_pred = model.predict(test_x)
+      # print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
+      # print(f'R^2: {r2_score(test_y, y_pred)}')
 
       # plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
       # plt.scatter(np.arange(0, test_y.size), test_y, label = "actual")
       # plt.legend()
       # plt.show()
-
-      model.save('model 2/onpm_latest5_msle.keras')
       return model
 
-def XGBoost(train_df, test_df):
+def train(train_df, test_df, model):
     train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
     train_y = train_df["ac_power"]
 
     test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
     test_y = test_df["ac_power"]
+    model.fit(train_x, train_y, epochs=325, batch_size=17, verbose= 0)
+    y_pred = model.predict(test_x)
+    print(f"MSE: {mean_squared_error(test_y, y_pred)}")
+    print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
+    print(f'R^2: {r2_score(test_y, y_pred)}')
 
 def hyperparameterTuning(train_df, test_df):
     train_x = train_df[["soiling", "poa_irradiance", "ambient_temp", "wind_speed"]]

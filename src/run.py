@@ -2,20 +2,14 @@ from sklearn.preprocessing import StandardScaler
 
 import SoilingNumberPredictionModel as snpm
 import OutputNumberPredictionModel as onpm
-from OutputNumberPredictionModel import log_cosh_mape, msle, smape
-from accessData import accessData, delete_outliers
-import sys
+from accessData import accessData
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
-from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
 import time
 
 def main():
-    # if len(sys.argv) not in [1, 2]:
-    #     sys.exit("Usage: C:/Users\sruth\Downloads\pvdaq_system_4_2010-2016_subset_soil_signal.csv")
     path = "/Users/sruthi/Downloads/pvdaq_system_4_2010-2016_subset_soil_signal.csv"
     data = accessData(pd.read_csv(path))
     data = data[data["ac_power"] >= 0]
@@ -31,39 +25,32 @@ def main():
     scaler = StandardScaler()
     days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]] = scaler.fit_transform(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
 
-
     bootstrapped_df = days_data.sample(n=20000, replace=True, random_state=np.random.randint(0, 10000))
-    # changed back from 10000 samples
-
-    def generate_jittered_data(df, num_copies=5, noise_level=0.02):
-        augmented_data = []
-        for _ in range(num_copies):
-            std_dev = df.std()
-            noise = np.random.normal(loc=0, scale=noise_level * std_dev, size=df.shape)
-            jittered_df = df + noise
-            augmented_data.append(jittered_df)
-        df_expanded = pd.concat([df] + augmented_data, ignore_index=True)
-        return df_expanded
-
-    jittered_data = generate_jittered_data(days_data, num_copies=5)
-    jittered_data = delete_outliers(jittered_data)
+    bootstrapped_df.sort_values(by= "Unnamed: 0")
 
     cleaning_data = data.diff()
     cleaning_data = cleaning_data[cleaning_data["soiling"] > 0]
     prev_number_of_cleanings = cleaning_data.size
 
-    train_df, test_df = train_test_split(bootstrapped_df, test_size=0.3, random_state=1)
+    window_size = 1000
+    step_size = 300
+    model = onpm.FeedForwardNetwork(bootstrapped_df)
+    for i in range(len(bootstrapped_df) - window_size):
+        train_df = data[:i + window_size]
+        test_df = data[i + window_size:i + window_size + step_size]
+        onpm.train(train_df, test_df, model)
+    # train_df, test_df = train_test_split(bootstrapped_df, test_size=0.3, random_state=1)
 
-    # ac_model = onpm.FeedForwardNetwork(train_df, test_df)
+    model.save("/Users/sruthi/PycharmProjects/pvCleaningProject2025/src/model2.keras")
     # ac_model2 = onpm.XGBoost(train_df, test_df)
-    ac_model = tf.keras.models.load_model('model 2/onpm_latest5_msle.keras')
+    # model = tf.keras.models.load_model('model2.keras')
 
     # from pprint import pprint
     #
     # config = ac_model.get_config()
     # pprint(config)
 
-    y_pred = ac_model.predict(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
+    y_pred = model.predict(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
     print(f"MSE: {mean_squared_error(days_data['ac_power'], y_pred)}")
     print(f"MAPE: {mean_absolute_percentage_error(days_data['ac_power'], y_pred)}")
     print(f'R^2: {r2_score(days_data["ac_power"], y_pred)}')
@@ -106,7 +93,7 @@ def main():
                 for index, day in next_week.iterrows():
                     day["soiling"] = np.maximum(0, days_data["soiling"][today - 1] + degradation_rate * i)
                     wanted_dataframe = day[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].to_frame().T
-                    day["ac_power"] = ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
+                    day["ac_power"] = model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
                     i += 1
             if next_week.size < 7:
                 previous_ac_power -= next_week["ac_power"].sum()
@@ -123,12 +110,12 @@ def main():
                     elif i == clean_day:
                         predicted_week["soiling"][i] = 1
                         wanted_dataframe = predicted_week[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].iloc[i].to_frame().T
-                        total_p += ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
+                        total_p += model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index= wanted_dataframe.index, columns= wanted_dataframe.columns))
                         for day in range(i + 1, 7):
                             predicted_week["soiling"][day] = np.maximum(0, 1 + degradation_rate * (day - clean_day))
                     else:
                         wanted_dataframe = predicted_week[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].iloc[i].to_frame().T
-                        total_p += ac_model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index=wanted_dataframe.index, columns=wanted_dataframe.columns))
+                        total_p += model.predict(pd.DataFrame(scaler.transform(wanted_dataframe), index=wanted_dataframe.index, columns=wanted_dataframe.columns))
                 if total_p > max_p:
                     max_p = total_p
                     optimal_clean_day = clean_day
