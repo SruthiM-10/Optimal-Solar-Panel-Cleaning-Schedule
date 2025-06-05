@@ -25,23 +25,25 @@ def main():
     scaler = StandardScaler()
     days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]] = scaler.fit_transform(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
 
-    bootstrapped_df = days_data.sample(n=20000, replace=True, random_state=np.random.randint(0, 10000))
+    seed = 42
+    np.random.seed(seed)
+    bootstrapped_df = days_data.sample(n=20000, replace=True, random_state=seed)
     bootstrapped_df.sort_values(by= "Unnamed: 0")
 
     cleaning_data = data.diff()
     cleaning_data = cleaning_data[cleaning_data["soiling"] > 0]
     prev_number_of_cleanings = cleaning_data.size
 
-    window_size = 1000
-    step_size = 300
+    window_size = 6000
+    step_size = 1000
     model = onpm.FeedForwardNetwork(bootstrapped_df)
-    for i in range(len(bootstrapped_df) - window_size):
-        train_df = data[:i + window_size]
-        test_df = data[i + window_size:i + window_size + step_size]
+    for i in range(0, len(bootstrapped_df) - window_size - step_size, step_size):
+        train_df = bootstrapped_df[:i + window_size]
+        test_df = bootstrapped_df[i + window_size:i + window_size + step_size]
         onpm.train(train_df, test_df, model)
     # train_df, test_df = train_test_split(bootstrapped_df, test_size=0.3, random_state=1)
 
-    model.save("/Users/sruthi/PycharmProjects/pvCleaningProject2025/src/model2.keras")
+    model.save("/Users/sruthi/PycharmProjects/pvCleaningProject2025/src/model3.keras")
     # ac_model2 = onpm.XGBoost(train_df, test_df)
     # model = tf.keras.models.load_model('model2.keras')
 

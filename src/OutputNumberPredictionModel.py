@@ -9,6 +9,7 @@ import random
 import numpy as np
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 from tensorflow.keras import layers
+from tensorflow.keras.callbacks import EarlyStopping
 import keras_tuner as kt
 
 def smape(y_true, y_pred):
@@ -54,7 +55,7 @@ def FeedForwardNetwork(data):
           Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
                 bias_initializer=tf.keras.initializers.Constant(mean_y)),
       ])
-      model.compile(loss='mae', optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm= 1.0),
+      model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm= 1.0),
                     metrics=[tf.keras.metrics.MeanAbsolutePercentageError()])
 
       # model.fit(train_x, train_y, epochs=5000, batch_size= 256)
@@ -74,7 +75,8 @@ def train(train_df, test_df, model):
 
     test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
     test_y = test_df["ac_power"]
-    model.fit(train_x, train_y, epochs=325, batch_size=17, verbose= 0)
+    early_stop = EarlyStopping(monitor= 'loss', patience=10, restore_best_weights=True)
+    model.fit(train_x, train_y, epochs=200, batch_size=32, verbose= 1, callbacks= [early_stop])
     y_pred = model.predict(test_x)
     print(f"MSE: {mean_squared_error(test_y, y_pred)}")
     print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
@@ -139,5 +141,14 @@ def hyperparameterTuning(train_df, test_df):
     Units in layer 0: 224
     Units in layer 1: 256
     '''
+
+'''
+Log notes:
+Model 2 - there were bugs in code, underfitting
+Model 3 - shows signs of overfitting (maybe try deleting some layers)
+
+To do:
+Change graphs and results section of paper
+'''
 
 
