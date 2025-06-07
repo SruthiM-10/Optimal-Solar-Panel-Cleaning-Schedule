@@ -10,7 +10,7 @@ import numpy as np
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 from tensorflow.keras import layers
 from tensorflow.keras.callbacks import EarlyStopping
-import keras_tuner as kt
+# import keras_tuner as kt
 
 def smape(y_true, y_pred):
     epsilon = tf.keras.backend.epsilon()
@@ -69,18 +69,29 @@ def FeedForwardNetwork(data):
       # plt.show()
       return model
 
-def train(train_df, test_df, model):
-    train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
-    train_y = train_df["ac_power"]
+def train(data):
+    window_size = 6000
+    step_size = 1000
+    model = FeedForwardNetwork(data)
+    for i in range(0, len(data) - window_size - step_size, step_size):
+        train_df = data[:i + window_size]
+        test_df = data[i + window_size:i + window_size + step_size]
+        train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+        train_y = train_df["ac_power"]
 
-    test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
-    test_y = test_df["ac_power"]
-    early_stop = EarlyStopping(monitor= 'loss', patience=10, restore_best_weights=True)
-    model.fit(train_x, train_y, epochs=200, batch_size=32, verbose= 1, callbacks= [early_stop])
-    y_pred = model.predict(test_x)
-    print(f"MSE: {mean_squared_error(test_y, y_pred)}")
-    print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
-    print(f'R^2: {r2_score(test_y, y_pred)}')
+        test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+        test_y = test_df["ac_power"]
+        early_stop = EarlyStopping(monitor= 'loss', patience=10, restore_best_weights=True)
+        model.fit(train_x, train_y, epochs=200, batch_size=32, verbose= 1, callbacks= [early_stop])
+        y_pred = model.predict(test_x)
+        print(f"MSE: {mean_squared_error(test_y, y_pred)}")
+        print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
+        print(f'R^2: {r2_score(test_y, y_pred)}')
+
+    y_pred = model.predict(data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
+    print(f"MSE: {mean_squared_error(data['ac_power'], y_pred)}")
+    print(f"MAPE: {mean_absolute_percentage_error(data['ac_power'], y_pred)}")
+    print(f'R^2: {r2_score(data["ac_power"], y_pred)}')
 
 def hyperparameterTuning(train_df, test_df):
     train_x = train_df[["soiling", "poa_irradiance", "ambient_temp", "wind_speed"]]

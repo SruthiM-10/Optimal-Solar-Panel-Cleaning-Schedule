@@ -1,74 +1,33 @@
 from sklearn.preprocessing import StandardScaler
 
-import SoilingNumberPredictionModel as snpm
-import OutputNumberPredictionModel as onpm
-from accessData import accessData
+# import SoilingNumberPredictionModel as snpm
+# import OutputNumberPredictionModel as onpm
+from accessData import accessData, process
 import pandas as pd
 import numpy as np
 import tensorflow as tf
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 import time
+from AlternateStrategies import Algorithm2
 
 def main():
-    path = "/Users/sruthi/Downloads/pvdaq_system_4_2010-2016_subset_soil_signal.csv"
+    path = "/Users/manoj/Downloads/pvdaq_system_4_2010-2016_subset_soil_signal.csv"
     data = accessData(pd.read_csv(path))
-    data = data[data["ac_power"] >= 0]
-
-    data["Unnamed: 0"] = pd.to_datetime(data["Unnamed: 0"])
-    days_data = data.groupby(data["Unnamed: 0"].dt.date).mean()
-    days_data.index = pd.to_datetime(days_data.index)
-    days_data["ac_power"] = data[["ac_power"]].groupby(data["Unnamed: 0"].dt.date).sum()
-    days_data.drop("Unnamed: 0", axis=1, inplace=True)
-
-    days_data["ac_power"] /= 1000  # units are kWatt-days
-    original_days_data = days_data.copy()
-    scaler = StandardScaler()
-    days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]] = scaler.fit_transform(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
-
-    seed = 42
-    np.random.seed(seed)
-    bootstrapped_df = days_data.sample(n=20000, replace=True, random_state=seed)
-    bootstrapped_df.sort_values(by= "Unnamed: 0")
-
-    cleaning_data = data.diff()
-    cleaning_data = cleaning_data[cleaning_data["soiling"] > 0]
-    prev_number_of_cleanings = cleaning_data.size
-
-    window_size = 6000
-    step_size = 1000
-    model = onpm.FeedForwardNetwork(bootstrapped_df)
-    for i in range(0, len(bootstrapped_df) - window_size - step_size, step_size):
-        train_df = bootstrapped_df[:i + window_size]
-        test_df = bootstrapped_df[i + window_size:i + window_size + step_size]
-        onpm.train(train_df, test_df, model)
-    # train_df, test_df = train_test_split(bootstrapped_df, test_size=0.3, random_state=1)
-
-    model.save("/Users/sruthi/PycharmProjects/pvCleaningProject2025/src/model3.keras")
-    # ac_model2 = onpm.XGBoost(train_df, test_df)
-    # model = tf.keras.models.load_model('model2.keras')
 
     # from pprint import pprint
     #
     # config = ac_model.get_config()
     # pprint(config)
 
-    y_pred = model.predict(days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
-    print(f"MSE: {mean_squared_error(days_data['ac_power'], y_pred)}")
-    print(f"MAPE: {mean_absolute_percentage_error(days_data['ac_power'], y_pred)}")
-    print(f'R^2: {r2_score(days_data["ac_power"], y_pred)}')
+    obj = Algorithm2()
+    obj.main(data)
 
-    # plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
-    # plt.scatter(np.arange(0, y_pred.size), days_data["ac_power"], label = "actual")
-    # plt.legend()
-    # plt.show()
-
+def algorithm1(data, prev_number_of_cleanings):
+    #onpm.train(data)
+    model = tf.keras.models.load_model('/Users/manoj/Downloads/model1.keras')
     matrix = np.load("matrix6.npy")
-    # plt.scatter(matrix[2], matrix[1])
-    # plt.show()
-
+    scaler, original_days_data, days_data = process(data, "daily")
     previous_ac_power = data["ac_power"].sum()
-    new_ac_power = 0
-    total_cleanings = 0
     days_data = original_days_data
     degradation_rate = snpm.DegredationRate(days_data)[0]/365
 
@@ -81,7 +40,6 @@ def main():
 
     cleaning_cost_matrix = matrix
     cleaning_cost_matrix = np.append(cleaning_cost_matrix, np.zeros((4, 9501)), axis=1)
-    # cleaning_cost_matrix = np.zeros((4, 501))
     for c in range(505, 10000, 10):
         cleaning_cost_matrix[0][c] = c
         cleaning_cost = cleaning_cost_matrix[0][c]
@@ -148,3 +106,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+'''
+TO DO:
+Have to run the model (both for daily and hourly) to get a graph of total data
+    - Calculate mean loss from model test
+Have to run the model across all the cleaning data (for algorithm 1 and 3) to get a graph
+Have to run Algorithm 2
+Have to code a sensitivity/robustness analysis
+
+Maybe later repeat for two more datasets?
+'''
