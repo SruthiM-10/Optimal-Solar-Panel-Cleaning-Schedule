@@ -10,6 +10,7 @@ import numpy as np
 from sklearn.metrics import mean_absolute_percentage_error, r2_score, mean_squared_error
 from tensorflow.keras import layers
 from tensorflow.keras.callbacks import EarlyStopping
+import pandas as pd
 # import keras_tuner as kt
 
 def smape(y_true, y_pred):
@@ -42,56 +43,72 @@ def FeedForwardNetwork(data):
       np.random.seed(SEED)
       tf.random.set_seed(SEED)
       model = Sequential([
-          tf.keras.Input(shape=(4,)),
-          Dense(256, activation="relu"),
-          Dense(200, activation="tanh"),
+          tf.keras.Input(shape=(6,)),
+          Dense(128, activation="relu"),
+          Dense(200),
           BatchNormalization(),
-          Dense(356, activation="relu"),
-          Dense(300, activation="relu"),
-          Dense(300, activation="relu"),
-          Dense(200, activation="tanh"),
+          tf.keras.layers.Activation("tanh"),
           Dense(200, activation="relu"),
-          Dense(200, activation="relu"),
+          Dense(128, activation="relu"),
           Dense(1, kernel_initializer=tf.keras.initializers.HeUniform(),
                 bias_initializer=tf.keras.initializers.Constant(mean_y)),
       ])
-      model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(1e-4, clipnorm= 1.0),
-                    metrics=[tf.keras.metrics.MeanAbsolutePercentageError()])
-
-      # model.fit(train_x, train_y, epochs=5000, batch_size= 256)
-      # y_pred = model.predict(test_x)
-      # print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
-      # print(f'R^2: {r2_score(test_y, y_pred)}')
-
-      # plt.scatter(np.arange(0, y_pred.size), y_pred, label = "predicted")
-      # plt.scatter(np.arange(0, test_y.size), test_y, label = "actual")
-      # plt.legend()
-      # plt.show()
+      model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(3e-4, clipnorm= 1.0),
+                    metrics=[tf.keras.metrics.MeanAbsolutePercentageError(), tf.keras.metrics.RootMeanSquaredError()])
       return model
 
-def train(data):
+def get_sample_weights(length):
+    weights = np.linspace(1, 3, length)  # Linear increasing weights
+    return weights / weights.sum()
+
+def train(days_data):
+    seed = 42
+    np.random.seed(seed)
+    bootstrapped_df = days_data.sample(n=40000, replace=True, random_state=seed)
+    bootstrapped_df.sort_index(inplace=True)
+
+    def generate_jittered_data(df, num_copies=9, noise_level=0.02):
+        augmented_data = []
+        for _ in range(num_copies):
+            std_dev = df.std()
+            noise = np.random.normal(loc=0, scale=noise_level * std_dev, size=df.shape)
+            jittered_df = df + noise
+            augmented_data.append(jittered_df)
+        df_expanded = pd.concat([df] + augmented_data, ignore_index=True)
+        return df_expanded
+    jittered_data = generate_jittered_data(days_data)
+
+    data = jittered_data
+
     window_size = 6000
-    step_size = 1000
+    step_size = 2000
     model = FeedForwardNetwork(data)
-    for i in range(0, len(data) - window_size - step_size, step_size):
+    for i in range(0, len(data) - window_size - 2 * step_size, step_size):
         train_df = data[:i + window_size]
-        test_df = data[i + window_size:i + window_size + step_size]
-        train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+        val_df = data[i + window_size:i + window_size + step_size]
+        train_x = train_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']]
         train_y = train_df["ac_power"]
 
-        test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]]
+        val_x = val_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']]
+        val_y = val_df["ac_power"]
+        early_stop = EarlyStopping(monitor= 'val_loss', patience=10, restore_best_weights=True)
+        sample_weights = get_sample_weights(len(train_y))
+        model.fit(train_x, train_y, sample_weight= sample_weights, epochs=200, batch_size=64, verbose= 1, validation_data= (val_x, val_y), callbacks= [early_stop])
+
+        test_df = data[i + window_size + step_size: i + window_size + 2 * step_size]
+        test_x = test_df[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']]
         test_y = test_df["ac_power"]
-        early_stop = EarlyStopping(monitor= 'loss', patience=10, restore_best_weights=True)
-        model.fit(train_x, train_y, epochs=200, batch_size=32, verbose= 1, callbacks= [early_stop])
-        y_pred = model.predict(test_x)
-        print(f"MSE: {mean_squared_error(test_y, y_pred)}")
+        y_pred = model.predict(test_x).flatten()
+        print(f"MSE: {mean_squared_error(test_y, y_pred, squared= False)}")
         print(f"MAPE: {mean_absolute_percentage_error(test_y, y_pred)}")
         print(f'R^2: {r2_score(test_y, y_pred)}')
 
-    y_pred = model.predict(data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
-    print(f"MSE: {mean_squared_error(data['ac_power'], y_pred)}")
+    y_pred = model.predict(data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']]).flatten()
+    print(f"MSE: {mean_squared_error(data['ac_power'], y_pred, squared= False)}")
     print(f"MAPE: {mean_absolute_percentage_error(data['ac_power'], y_pred)}")
     print(f'R^2: {r2_score(data["ac_power"], y_pred)}')
+
+    return model
 
 def hyperparameterTuning(train_df, test_df):
     train_x = train_df[["soiling", "poa_irradiance", "ambient_temp", "wind_speed"]]
@@ -158,8 +175,15 @@ Log notes:
 Model 2 - there were bugs in code, underfitting
 Model 3 - shows signs of overfitting (maybe try deleting some layers)
 
-To do:
-Change graphs and results section of paper
+Model 5 (best so far) - added day
+Model 6 - added month
+
+Model 7 - pretty good! (5 copies of jittered data)
+Model 8 - 9 copies
+Model 9 - Dropout 0.3
+Model 10 - pretty good! (Dropout 0.2, Activation after Batch Normalization, rmse = 22.75)
+Model 11 - No dropout, rmse = 18!
+Tried - Removed latter kernel_regularizer.. basically the same but marginally better
 '''
 
 

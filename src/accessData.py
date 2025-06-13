@@ -35,18 +35,18 @@ def delete_outliers(data):
 
 def process(data, type):
     if type == "daily":
-        days_data = data.groupby(data["Unnamed: 0"].dt.date).mean()
-        days_data.index = pd.to_datetime(days_data.index)
-        days_data["ac_power"] = data[["ac_power"]].groupby(data["Unnamed: 0"].dt.date).sum()
+        data.index = pd.to_datetime(data.index)
+        days_data = data[["ac_power", "poa_irradiance", "ambient_temp", "wind_speed", "soiling"]].resample('d').mean()
+        days_data.index.name = None
+        days_data["ac_power"] = data[["ac_power"]].resample('d').sum()
+        days_data.dropna(inplace=True)
         days_data["ac_power"] /= 1000  # units are kWatt-days
+        days_data['day'] = days_data.index.dayofyear
+        days_data['month'] = days_data.index.month
         original_days_data = days_data.copy()
         scaler = StandardScaler()
-        days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]] = scaler.fit_transform(
-            days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling"]])
-        seed = 42
-        np.random.seed(seed)
-        bootstrapped_df = days_data.sample(n=20000, replace=True, random_state=seed)
-        bootstrapped_df.sort_index(inplace= True)
+        days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']] = scaler.fit_transform(
+            days_data[["poa_irradiance", "ambient_temp", "wind_speed", "soiling", 'day', 'month']])
         return scaler, original_days_data, days_data
     elif type == "hourly":
         data.index = pd.to_datetime(data.index)
